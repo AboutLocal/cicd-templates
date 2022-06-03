@@ -18,6 +18,7 @@ on:
       terraform_version:
         description: 'TF Version'
         required: true
+        type: string
 
 jobs:
   terraform_plan:
