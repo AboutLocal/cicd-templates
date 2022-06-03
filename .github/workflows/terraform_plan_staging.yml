@@ -13,7 +13,7 @@ on:
         type: string
       input_spontinst:
         description: 'Use Spotinst Token'
-        required: false
+        default: false
         type: boolean
       terraform_version:
         description: 'TF Version'
