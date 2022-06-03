@@ -17,7 +17,6 @@ on:
         type: boolean
       terraform_version:
         description: 'TF Version'
-        type: number
         required: true
 
 jobs:
