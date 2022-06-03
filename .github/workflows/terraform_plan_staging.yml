@@ -1,0 +1,128 @@
+name: 'Terraform Plan Staging'
+
+on:
+  workflow_call:
+    inputs:
+      github_ref:
+        description: 'Github Branch'
+        required: true
+        type: string
+      terrafom_path:
+        description: 'IAC Path'
+        required: true
+        type: string
+      input_spontinst:
+        description: 'Use Spotinst Token'
+        required: false
+        type: boolean
+      terraform_version:
+        description: 'TF Version'
+        type: number
+        required: true
+
+jobs:
+  terraform_plan:
+    name: 'terraform_plan'
+    runs-on: self-hosted
+    env:
+      DOMAIN: ${{secrets.DOMAIN}}
+      AWS_DEFAULT_REGION: "eu-west-1"
+      BACKEND_CONFIG_ARN: ${{ secrets.TFSTATE_BACKEND_CONFIG_ARN }}
+      TF_VAR_spotinst_token: ${{ secrets.STAGING_SPOTINST_TOKEN }}
+
+    steps:
+      - uses: act10ns/slack@v1
+        if: always()
+        with:
+          status: starting
+          channel: ${{secrets.SLACK_CHANNEL}}
+
+      - name: 'Checkout'
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.inputs.github_ref }}
+
+      - name: 'CICD Domain Role'
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: "eu-west-1"
+          role-to-assume: ${{ secrets.DOMAIN_ROLE_TO_ASSUME}}
+          role-duration-seconds: 1200
+          role-session-name: MySessionName
+
+      - name: Setup Nodejs
+        id: setup_node
+        uses: actions/setup-node@v1
+
+      - name: 'Setup Terraform'
+        id: setup_terraform
+        if: success()
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: ${{ github.event.inputs.terraform_version }}
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: 'Terraform Init'
+        id: terraform_init
+        if: success()
+        run: |
+          cd  ${{ github.event.inputs.terrafom_path }}
+          terraform init -backend-config=role_arn=$BACKEND_CONFIG_ARN -no-color
+
+      - name: 'Terraform Validate'
+        id: terraform_validate
+        if: always()
+        run: |
+          terraform validate
+
+      - name: 'Terraform Workspace'
+        id: terraform_workspace
+        if: success()
+        run: |
+          cd  ${{ github.event.inputs.terrafom_path }}
+          terraform workspace select staging
+
+      - name: 'Terraform Plan'
+        id: terraform_plan
+        if: success()
+        run: |
+          cd  ${{ github.event.inputs.terrafom_path }}
+          if [ github.event.inputs.input_spontinst == 'true' ]
+          then
+            terraform plan -var "spotinst_token=$TF_VAR_spotinst_token"
+            exit 0
+          else
+            terraform plan
+          fi
+
+      - uses: act10ns/slack@v1
+        if: always()
+        with:
+          status: ${{ job.status }}
+          steps: ${{ toJson(steps) }}
+          channel: ${{secrets.SLACK_CHANNEL}}
+
+  close_job:
+    # this job will only run if the PR has been closed without being merged
+    if: github.event.pull_request.merged == false
+    runs-on: self-hosted
+    steps:
+      - uses: act10ns/slack@v1
+        if: always()
+        with:
+          status: starting
+          channel: ${{secrets.SLACK_CHANNEL}}
+
+      - name: "PR Closed"
+        id: pr_closed_without_being_merged
+        run: |
+          echo PR #${{ github.event.number }} has been closed without being merged
+
+      - uses: act10ns/slack@v1
+        if: always()
+        with:
+          status: ${{ job.status }}
+          steps: ${{ toJson(steps) }}
+          channel: ${{secrets.SLACK_CHANNEL}}
